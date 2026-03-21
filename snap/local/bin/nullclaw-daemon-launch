@@ -1,0 +1,24 @@
+#!/bin/sh
+# nullclaw-daemon-launch — persistent gateway service.
+#
+# On first start (no config file present) it probes for local Lemonade and
+# Ollama instances and, if found, writes a minimal config.json so the gateway
+# has a working LLM provider without any manual configuration.  Lemonade is
+# preferred as primary; Ollama is used as a fallback when both are present.
+# If neither is detected the gateway still starts with NullClaw's safe
+# defaults; run 'nullclaw onboard' at any time to complete setup.
+
+mkdir -p "$SNAP_USER_COMMON/workspace"
+
+CONFIG_FILE="$SNAP_USER_COMMON/.nullclaw/config.json"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+  if "$SNAP/bin/setup-providers"; then
+    echo "nullclaw: provider config written to $CONFIG_FILE"
+  else
+    echo "nullclaw: no local providers detected; starting with safe defaults"
+    echo "nullclaw: run 'nullclaw onboard' to configure an LLM provider"
+  fi
+fi
+
+exec "$SNAP/bin/nullclaw" gateway

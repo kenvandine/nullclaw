@@ -1,0 +1,8 @@
+#!/bin/sh
+# nullclaw-launch — wrapper that keeps all NullClaw data inside the snap's
+# private user directory and passes all arguments through to the binary.
+
+# Make sure the workspace directory exists on first run.
+mkdir -p "$SNAP_USER_COMMON/workspace"
+
+exec "$SNAP/bin/nullclaw" "$@"

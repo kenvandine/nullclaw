@@ -1,0 +1,110 @@
+name: nullclaw
+base: core24
+adopt-info: nullclaw
+summary: Local-first autonomous AI assistant (NullClaw)
+description: |
+  NullClaw is a lightweight, local-first autonomous AI assistant — a static
+  binary that boots in milliseconds with no runtime dependencies beyond libc.
+  It connects to locally-running AI model servers (Lemonade, Ollama) and
+  exposes a gateway for chat channels (Telegram, Discord, Signal, web UI)
+  and agentic tasks such as file operations, code execution, and scheduled
+  jobs.
+
+  On first launch the service automatically detects running Lemonade and
+  Ollama instances and configures them as providers, with Lemonade as the
+  preferred default.  No cloud account or API key is required.
+
+  Configuration and workspace data are stored privately in
+  ~/snap/nullclaw/current/.  Files you want the agent to work with should
+  live in your home directory (non-hidden folders); grant access via the
+  built-in workspace configuration.
+
+  Run the interactive setup wizard at any time: nullclaw onboard
+
+grade: stable
+confinement: strict
+
+apps:
+  # Interactive CLI — onboarding wizard, config editing, status checks, etc.
+  # Run as: nullclaw <command>
+  nullclaw:
+    command: bin/nullclaw-launch
+    environment:
+      HOME: $SNAP_USER_COMMON
+      XDG_CONFIG_HOME: $SNAP_USER_COMMON/.config
+      XDG_DATA_HOME: $SNAP_USER_COMMON/.local/share
+      XDG_CACHE_HOME: $SNAP_USER_COMMON/.cache
+    plugs:
+      - home
+      - network
+
+  # Persistent gateway service — managed by snapd/systemd.
+  # Enable:  snap start --enable nullclaw.service
+  # Disable: snap stop  --disable nullclaw.service
+  # On first start auto-configures Lemonade/Ollama if detected.
+  service:
+    command: bin/nullclaw-daemon-launch
+    environment:
+      HOME: $SNAP_USER_COMMON
+      XDG_CONFIG_HOME: $SNAP_USER_COMMON/.config
+      XDG_DATA_HOME: $SNAP_USER_COMMON/.local/share
+      XDG_CACHE_HOME: $SNAP_USER_COMMON/.cache
+    daemon: simple
+    daemon-scope: user   # run as a systemd user unit, not root, so $SNAP_USER_COMMON
+                         # and our HOME=$SNAP_USER_COMMON override resolve identically
+                         # for both this daemon and the 'nullclaw' CLI app — they share
+                         # the same config.json without any root/user path mismatch.
+    restart-condition: on-failure
+    restart-delay: 10s
+    plugs:
+      - home
+      - network
+      - network-bind
+
+parts:
+  launcher:
+    plugin: dump
+    source: snap/local
+    organize:
+      bin/nullclaw-launch: bin/nullclaw-launch
+      bin/nullclaw-daemon-launch: bin/nullclaw-daemon-launch
+      bin/setup-providers: bin/setup-providers
+
+  nullclaw:
+    plugin: nil
+    override-pull: |
+      # Fetch the latest release tag from GitHub.
+      VERSION=$(curl -fsSL \
+        "https://api.github.com/repos/nullclaw/nullclaw/releases/latest" \
+        | grep '"tag_name"' | head -1 \
+        | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+      if [ -z "$VERSION" ]; then
+        echo "nullclaw: failed to determine latest release version" >&2
+        exit 1
+      fi
+      # Strip leading 'v' for the snap version string.
+      craftctl set version="${VERSION#v}"
+
+      # Map Snapcraft target arch to the GitHub release binary name.
+      case "$CRAFT_ARCH_BUILD_FOR" in
+        amd64)   ARCH="x86_64" ;;
+        arm64)   ARCH="aarch64" ;;
+        armhf)   ARCH="arm32-gnu" ;;
+        riscv64) ARCH="riscv64" ;;
+        *) echo "nullclaw: unsupported architecture: $CRAFT_ARCH_BUILD_FOR" >&2; exit 1 ;;
+      esac
+
+      BINARY="nullclaw-linux-${ARCH}.bin"
+      echo "nullclaw: downloading ${BINARY} (${VERSION})"
+      curl -fsSL \
+        "https://github.com/nullclaw/nullclaw/releases/download/${VERSION}/${BINARY}" \
+        -o "$CRAFT_PART_SRC/nullclaw"
+      chmod +x "$CRAFT_PART_SRC/nullclaw"
+    override-build: |
+      install -Dm755 "$CRAFT_PART_SRC/nullclaw" "$CRAFT_PART_INSTALL/bin/nullclaw"
+    build-packages:
+      - curl
+    stage-packages:
+      # curl is used by the setup-providers script at runtime to probe
+      # local provider endpoints.
+      - curl
